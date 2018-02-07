@@ -25,7 +25,7 @@ qfind -st "<sql-query>"
 
 [The find command](http://man7.org/linux/man-pages/man1/find.1.html)
 
-- Installed by default in most Linux distros.
+- Installed by default in on most *nix systems.
 
 [TermSQL](https://github.com/tobimensch/termsql)
 
