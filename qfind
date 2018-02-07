@@ -1,0 +1,408 @@
+#!/bin/python
+
+# TODO:
+# Investigate problems with computed fields when used in complex queries.
+# Check that tabview piping works
+# use classes instead of lists in field_map and comp fields ordered dicts
+# Unit testing
+# Check dependencies: find, termsql, tabview, sqlparse
+# Version number. Output with -v
+# Check if it will work on Windows or Mac.
+# - I think there is a problem with running Python Curses on Windows.
+# Short hand queries:
+#   Starting with 'where' implys 'select * from files where...' eg:
+#       qfind "where depth = 1"     implys     qfind "select * from files where depth = 1"
+#   Select only implys 'select ... from files' eg:
+#       qfind "select path, symlink"    implys    qfind "select path, symlink from files"
+# Arg to write out config file in current dir
+
+import argparse, configparser, itertools, os, subprocess, sqlparse, sys, tabview, uuid
+from collections import OrderedDict
+
+# The complete list of qfind field names, each with corresponding find command '-printf' format and description
+# This map is used to build the find command string that gets the data to be processed by termsql
+field_map = OrderedDict({
+    'accesseds': [ '%A+', "File's last access time as a string with seconds to the filesystem's max precision." ],
+    'accessedu': [ '%A@', "File's last access time in Unix time." ],
+    'blocks': [ '%b', "The amount of disk space used for this file in 512-byte blocks. Since disk space is allocated in multiples of the filesystem block size this is usually greater than %s/512, but it can also be smaller if the file is a sparse file." ],
+    'changeds': [ '%C+', "File metadata last change time as a string with seconds to the filesystem's max precision." ],
+    'changedu': [ '%C@', "File metadata last change time in Unix time." ],
+    'depth': [ '%d', "File's depth in the directory tree; 0 means the file is a starting-point." ],
+    'device': [ '%D', "The device number on which the file exists (the st_dev field of struct stat), in decimal." ],
+    'dirs': [ '%h/', "Leading directories of file's name (all but the last element). If the file name contains no slashes (since it is in the current directory) the %h specifier expands to \".\"." ],
+    'diskspace': [ '%k', "The amount of disk space used for this file in 1K blocks. Since disk space is allocated in multiples of the filesystem block size this is usually greater than %s/1024, but it can also be smaller if the file is a sparse file." ],
+    'name': [ '%f', "File's name with any leading directories removed (only the last element)." ],
+    'filesystem': [ '%F', "Type of the filesystem the file is on." ],
+    'groupid': [ '%G', "File's numeric group ID." ],
+    'groupname': [ '%g', "File's group name, or numeric group ID if the group has no name."], # Had to call it this as 'group' is a SQL keyword." ],
+    'hardlinks': [ '%n', "Number of hard links to file."],
+    'inode': [ '%i', "File's inode number (in decimal)." ],
+    'modifieds': [ '%T+', "File content last modification time as a string with seconds to the filesystem's max precision."],
+    'modifiedu': [ '%T@', "File content last modification time in Unix time."],
+    'path': [ '%p', "The full path and file name."],
+    'pathshort': [ '%P', "File's name with the name of the starting-point under which it was found removed."],
+    'permbits': [ '%m', "File's permission bits (in octal). This option uses the `traditional' numbers which most Unix implementations use, but if your particular implementation uses an unusual ordering of octal permissions bits, you will see a difference between the actual value of the file's mode and the output of %m." ],
+    'permissions': [ '%M', "File's permissions (in symbolic form, as for ls). This directive is supported in findutils 4.2.5 and later."],
+    'size': [ '%s', "File's size in bytes."],
+    'security': [ '%Z', "(SELinux only) file's security context."],
+    'sparseness': [ '%S', "File's sparseness. This is calculated as (BLOCKSIZE*st_blocks / st_size). The exact value you will get for an ordinary file of a certain length is system-dependent. However, normally sparse files will have values less than 1.0, and files which use indirect blocks may have a value which is greater than 1.0. The value used for BLOCKSIZE is system-dependent, but is usually 512 bytes. If the file size is zero, the value printed is undefined. On systems which lack support for st_blocks, a file's sparseness is assumed to be 1.0."],
+    'startpoint': [ '%H', "Starting-point under which file was found." ],
+    'symlink': [ '%l', "Object of symbolic link (empty string if file is not a symbolic link)." ],
+    'type': [ '%y', "File's type (like in ls -l), U=unknown type (shouldn't happen)"],
+    'typeextra': [ '%Y', "File's type (like %y), plus follow symlinks: L=loop, N=nonexistent"],
+    'user': [ '%u', "File's user name, or numeric user ID if the user has no name."],
+    'userid': [ '%U', "File's numeric user ID."],
+})
+
+# computed_fields[0] is a format string where the {} is replaced with the column alias if there is one
+computed_fields = OrderedDict({
+    'accessed': [ "datetime(replace({0}accessed, '+', ''))", 'File\'s last access time as a Sqlite datetime field.' ],
+    'accessedms': [ "strftime('%Y-%m-%d %H:%M:%f', replace({0}accessed, '+', ''))", 'File\'s last access time as a string with milliseconds.' ],
+    'changed': [ "datetime(replace({0}changed, '+', ''))", 'File metadata last change time as a Sqlite datetime field.' ],
+    'changedms': [ "strftime('%Y-%m-%d %H:%M:%f', replace({0}changed, '+', ''))", 'File metadata last change time as a string with milliseconds.' ],
+    'ext': [ "case when instr({0}name, '.') > 1 then replace({0}name, rtrim({0}name, replace({0}name, '.', '')), '') else null end", 'File extension.' ],
+    'modified': [ "datetime(replace({0}modifieds, '+', ''))", 'File content last modification time as a Sqlite datetime field.' ],
+    'modifiedms': [ "strftime('%Y-%m-%d %H:%M:%f', replace({0}modifieds, '+', ''))", 'File content last modification time as a string with milliseconds.' ],
+    'pathwithslash': [ "case when {0}type = 'd' then {0}path || '/' else {0}path end", 'The path with a \'/\' appended if it is a dir.'],
+    'woext': [ "case when instr({0}name, '.') > 1 then replace({0}name, '.' || replace({0}name, rtrim({0}name, replace({0}name, '.', '')), ''), '') else {0}name end", 'File name without extension.' ],
+})
+
+# The preferred subset of fields from field_map that are displayed when the query is 'select *'
+star_fields = ['permissions', 'hardlinks', 'user', 'groupname', 'size', 'modified', 'type', 'path']
+
+def eprint(*args, **kwargs):
+    """ Print to stderr """
+    print(*args, file=sys.stderr, **kwargs)
+
+def parse_args(config):
+    """ Parse qfind's arguments. """
+
+    parser = argparse.ArgumentParser(
+        description = "Search for files using a SQL query",
+        epilog = "'SELECT *' queries return only the starfields which is a subset of all possible fields that the 'find' command can produce. To see a complete list of all fields, run: 'qfind -s'")
+
+    parser.add_argument('-d', '--delimiter', nargs = '?', default = config['qfind']['Delimiter'] or '|',
+        help = 'A singe char used to delimit the output of the find command (the default is pipe)')
+    parser.add_argument('-of', '--output-find', action='store_true', help = 'Output the results of find command without piping to termsql.')
+    parser.add_argument('-o', '--output', action='store_true', help = 'Output results to stdout instead of displaying with tabview')
+    parser.add_argument('-sf', '--show-find-command', action='store_true', help = 'Show the generated find command string without runing the query')
+    parser.add_argument('-st', '--show-termsql-command', action='store_true', help = 'Show the generated termsql command string without running the query')
+    parser.add_argument('-s', '--show-all-fields', action='store_true', help = 'Show all possible fields that can be used in the query')
+    parser.add_argument('-t', '--extra-termsql-args', nargs = '?', default = config['qfind']['ExtraTermsqlArgs'],
+        help = 'Specify additional arguments to termsql. The set of termsql args must be quoted and have a space between the first quote and the first arg eg: qfind -o -t \' -m html\' ...')
+    parser.add_argument('-f', '--extra-find-args', nargs = '?', help = 'Supply additional arguments to the find command. The set of find args must be quoted and have a space between the first quote and the first arg eg: qfind -f \" -iname \'*.txt\'\" ...')
+    parser.add_argument('start_dir', nargs = '?', help = 'Starting dir. If not specified then the current dir is used.')
+    parser.add_argument('query', nargs = '?', help = 'The file search SQL query')
+
+    args = parser.parse_args()
+
+    # If only only the query arg has been specified then argparse will think that it is start_dir so put start_dir's value into the query arg.
+    if args.start_dir and not args.query:
+        args.query = args.start_dir
+        args.start_dir = None
+
+    # Query is mandatory if -f not used.
+    if not args.show_all_fields and not args.query:
+        parser.error('query is required')
+
+    return args
+
+def sqlparse_apply_sqlite_dialect():
+    """ Make sure that sqlparse only complies with Sqlite's sql dialect not other sqls. This allows us to use field names that could be flagged as keywords in other sql dialects. """
+    # Keyword exceptions (will be removed from sqlparse's keyword definitions)
+    del(sqlparse.keywords.KEYWORDS['FILE'])
+    del(sqlparse.keywords.KEYWORDS['SECURITY'])
+    del(sqlparse.keywords.KEYWORDS['SIZE'])
+    del(sqlparse.keywords.KEYWORDS['TYPE'])
+    del(sqlparse.keywords.KEYWORDS['USER'])
+
+    # Adding Sqlite function names to the keywords list isn't enough as sqlparse doesn't seem to class tokens followed by parenthesis as keywords and there is no 'function' classification. I think it needs a regex adding to keywords.py SQL_REGEX to allow functions to be detected. Anyway not really a problem as Name tokens that aren't in field_map or computed_fields get ignored by preparse().
+    #sqlparse.keywords.KEYWORDS['INSTR'] = sqlparse.tokens.Keyword
+    #sqlparse.keywords.KEYWORDS['LTRIM'] = sqlparse.tokens.Keyword
+    #sqlparse.keywords.KEYWORDS['REPLACE'] = sqlparse.tokens.Keyword
+    #sqlparse.keywords.KEYWORDS['RTRIM'] = sqlparse.tokens.Keyword
+
+def check_all_fields():
+    """ Check that field in field_map are not SQL keywords """
+    # For a list of sqlite keywords see: https://sqlite.org/lang_keywords.html
+
+    for field in field_map:
+        if sqlparse.keywords.is_keyword(field)[0] != sqlparse.tokens.Name:
+            raise Exception("check_all_fields: Field '{}' does not parse as a SQL 'name' token. Does a SQL identifier have the same name?".format(field))
+
+    for field in computed_fields:
+        if sqlparse.keywords.is_keyword(field)[0] != sqlparse.tokens.Name:
+            raise Exception("check_all_fields: Computed field '{}' does not parse as a SQL 'name' token. Does a SQL identifier have the same name?".format(field))
+
+def check_star_fields():
+    """ Check that each star field exists within field_map """
+    for field in star_fields:
+        if not field in field_map:
+            if not field in computed_fields:
+                raise Exception("check_star_fields: Star field '{}' not found in field_map or computed_fields.".format(field))
+
+def has_alias(token):
+    if (
+        (
+            token.ttype is sqlparse.tokens.Name
+            or (token.ttype is sqlparse.tokens.Wildcard and token.value == '*')
+        )
+        and type(token.parent) is sqlparse.sql.Identifier
+        and '.' in token.parent.value
+    ):
+        return True
+    else:
+        return False
+
+def get_alias(token):
+    if not has_alias(token):
+        raise Exception("Token '{}' doesn't have an alias so can't get it.".format(token))
+    return token.parent[0].value + token.parent[1].value
+
+def add_computed_field(field_name, alias, printf_fields):
+    res = ''
+
+    if alias is None:
+        alias = ''
+
+    # Expand computed field in new query
+    expanded = computed_fields[field_name][0].format(alias)
+    res += expanded
+
+    # If the computed field includes some of the fields from field_map then also add those fields to the parsed fields list.
+    comp_parsed = sqlparse.parse(expanded)[0]
+    for comp_token in comp_parsed.flatten():
+        if comp_token.ttype is sqlparse.tokens.Name and comp_token.value in field_map:
+            printf_fields[comp_token.value] = field_map[comp_token.value]
+
+    return res
+
+def preparse(query):
+    """ Get a list of printf fields to use with the find command. Expand star fields and computed fields. Do basic error checking on the query e.g. check for star in like. """
+
+    parsed = {}
+    parsed['expanded_query'] = "" # args.query with select all '*' swapped with the actual star_fields
+    parsed['fields'] = OrderedDict()
+    parsed['errors'] = OrderedDict()
+
+    tokens = sqlparse.parse(query)[0]
+    if tokens[0].value.lower() != 'select':
+        parsed['errors']['isnotaselect'] = "Only SELECT statements are allowed."
+        return parsed # Don't parse the rest of the tokens if it isn't a select
+
+    # Find procurances of LIKE with * instead of % (easy to confuse when used to using linux find)
+    in_select = False
+    in_like = False
+    for token in tokens.flatten():
+        #print("token={}, ws={}, ttype={}, parent={}".format(token.value, token.is_whitespace, token.ttype, type(token.parent)))
+        expanded_token = token.value
+
+        if token.ttype is sqlparse.tokens.DML and token.value.lower() == 'select':
+            in_select = True
+        elif in_select:
+            # Check for select * and if found, add all star_fields
+            if token.ttype is sqlparse.tokens.Wildcard and token.value == '*':
+                expanded_token = ''
+                # Does the star have an alias?
+                alias = ''
+                if has_alias(token):
+                    alias = get_alias(token)
+                # Add the star fields to the expanded query
+                for field in star_fields:
+                    if field in field_map:
+                        parsed['fields'][field] = field_map[field]
+                        expanded_token += alias + field + ", "
+                    elif field in computed_fields:
+                        expanded_token += add_computed_field(field, alias, parsed['fields'])
+                        if not token.within(sqlparse.sql.Parenthesis):
+                            expanded_token += " as {}".format(field)
+                        expanded_token += ", "
+                expanded_token = expanded_token[:expanded_token.rfind(', ')] # Strip trailing comma space
+
+            elif token.is_keyword and token.value.lower() == 'from':
+                in_select = False # Exit 'select' once we get to the 'from'
+
+        # Check for * instead of % after 'like'
+        elif token.ttype is sqlparse.tokens.Keyword and token.value.lower() == 'like':
+            in_like = True
+
+        elif in_like:
+            if token.ttype is sqlparse.tokens.Literal.String.Single and '*' in token.value: # otherwise check for star
+                parsed['errors']['starinlike'] = "'*' detected after LIKE. Use '%' instead."
+            elif token.is_keyword:
+                in_like = False # Exit 'like'
+
+        # Gather fields used in query (this is run across the entire query, not just the select or the where)
+        if token.ttype is sqlparse.tokens.Name:
+            if token.value in field_map:
+                parsed['fields'][token.value] = field_map[token.value]
+            elif token.value in computed_fields:
+                alias = ''
+                field_name = token.value
+
+                # Separate alias and field
+                parent = token.parent
+                if type(parent) is sqlparse.sql.Identifier and '.' in parent.value:
+                    alias = parent.value[:parent.value.index('.') + 1]
+                    field_name = parent.value[parent.value.index('.') + 1:]
+
+                expanded_token = add_computed_field(field_name, alias, parsed['fields'])
+                # Append column name if in select clause
+                if in_select:
+                    expanded_token += " as {}".format(token)
+
+        # Ignore the alias part if it's a computed field or select *
+        if (
+            has_alias(token)
+            and (
+                (token.ttype is sqlparse.tokens.Name and token.value in computed_fields)
+                or (token.ttype is sqlparse.tokens.Wildcard and token.value == '*')
+            )
+            and parsed['expanded_query'].endswith(get_alias(token))
+        ):
+            parsed['expanded_query'] = parsed['expanded_query'][:-len(get_alias(token))]
+
+        # Append current token to new query
+        parsed['expanded_query'] += expanded_token
+
+    return parsed
+
+def build_find_cmd(parsed, args):
+    template = r'find{} ! -path {}{} -printf "{}"'
+
+    printf_format = ''
+    for field, value in parsed['fields'].items():
+        printf_format += value[0] + args.delimiter
+
+    # Remove trailing delimiter char
+    printf_format = printf_format[:-1]
+
+    # End with a line break.
+    printf_format += r'\n'
+
+    start_dir = ""
+    if args.start_dir:
+        start_dir += " {}".format(args.start_dir)
+        not_path = args.start_dir
+    else:
+        not_path = "."
+
+    extra_find_args = ''
+    if args.extra_find_args:
+        if not args.extra_find_args[0] == ' ':
+            extra_find_args += ' '
+        extra_find_args += args.extra_find_args
+
+    cmd = template.format(start_dir, not_path, extra_find_args, printf_format)
+
+    return cmd
+
+def build_termsql_cmd(parsed, args):
+    if args.output:
+        show_headers = ''
+    else:
+        show_headers = ' -0'
+
+    cols = " -c '"
+    for field in parsed['fields']:
+        cols += field + ','
+    cols += "'"
+
+    extra_termsql_args = ''
+    if args.extra_termsql_args:
+        if not args.extra_termsql_args[0] == ' ':
+            extra_termsql_args += ' '
+        extra_termsql_args += args.extra_termsql_args
+
+    return "termsql -d '{}' -t 'files' {}{}{} \"{}\"".format(args.delimiter, show_headers, cols, extra_termsql_args, parsed['expanded_query'])
+
+def show_fields():
+    print("The following fields may be used in the query:\nNote that 'select *' only selects a subset of these fields. These fields are denoted with a '*' below (see star fields).\n")
+
+    max_len = 0
+    for field in itertools.chain(field_map, computed_fields):
+        if len(field) > max_len:
+            max_len = len(field)
+
+    for field, value in field_map.items():
+        if field in star_fields:
+            field = field + "*"
+        print(field, " " * (max_len - len(field) + 4), value[1], "(printf " + value[0] + ")\n")
+
+    print("Computed fields:\n")
+    for field, value in computed_fields.items():
+        if field in star_fields:
+            field = field + "*"
+        print(field, " " * (max_len - len(field) + 4), value[1])
+
+def get_config():
+    global star_fields
+
+    config = configparser.ConfigParser()
+    if not config.read(os.path.expanduser('~/.config/qfind/qfind.config')):
+        if not config.read(os.path.expanduser('~/.qfind/qfind.config')):
+            config.read(os.path.expanduser('~/.qfind.config'))
+
+    if not config.has_section('qfind'):
+        config.add_section('qfind')
+
+    if not config.has_option('qfind', 'StarFields'):
+        config.set('qfind', 'StarFields', '')
+    else:
+        if config['qfind']['StarFields']:
+            star_fields = config['qfind']['StarFields'].split(' ')
+
+    if not config.has_option('qfind', 'Delimiter'):
+        config.set('qfind', 'Delimiter', '')
+
+    if not config.has_option('qfind', 'ExtraTermsqlArgs'):
+        config.set('qfind', 'ExtraTermsqlArgs', '')
+
+    return config
+
+def main():
+    sqlparse_apply_sqlite_dialect()
+
+    temp_file = '/tmp/qfind-{}.tmp'.format(str(uuid.uuid4()).replace('-', ''))
+
+    config = get_config()
+    args = parse_args(config)
+
+    #check_all_fields() # Check that sqlparse will parse the fields in field_map as name tokens. No need to run this unless the field map has been changed so leave commented out.
+    check_star_fields()
+
+    if args.show_all_fields:
+        show_fields()
+        return
+
+    parsed = preparse(args.query)
+    if parsed['errors']:
+        for __, error in parsed['errors'].items():
+            eprint(error)
+        return
+
+    find_cmd = build_find_cmd(parsed, args)
+    term_sql_cmd = build_termsql_cmd(parsed, args)
+
+    if args.show_find_command:
+        print(find_cmd)
+    elif args.show_termsql_command:
+        print(term_sql_cmd)
+    elif args.output_find:
+        subprocess.run(find_cmd, shell = True)
+    elif args.output:
+        subprocess.run(find_cmd + ' | ' + term_sql_cmd, shell = True)
+    else:
+        temp_file_cmd = find_cmd + ' | ' + term_sql_cmd + ' > ' + temp_file
+        try:
+            subprocess.run(temp_file_cmd, shell = True)
+            if os.stat(temp_file).st_size == 0:
+                eprint("No rows returned.")
+            else:
+                tabview.view(temp_file, delimiter = args.delimiter, column_width = 'max')
+        finally:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+
+if __name__ == "__main__":
+    main()
