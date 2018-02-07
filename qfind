@@ -79,20 +79,20 @@ def parse_args(config):
 
     parser = argparse.ArgumentParser(
         description = "Search for files using a SQL query",
-        epilog = "\"SELECT *\" queries return only the starfields which is a subset of all possible fields that the 'find' command can produce. To see a complete list of all fields, run: 'qfind -s'")
+        epilog = "\"SELECT *\" queries return only the starfields which is a subset of all possible fields that the 'find' command can produce. To see a complete list of all fields, run: qfind -s")
 
     parser.add_argument('-d', '--delimiter', nargs = '?', default = config['qfind']['Delimiter'] or '|',
         help = 'A singe char used to delimit the output of the find command (the default is pipe)')
     parser.add_argument('-of', '--output-find', action='store_true', help = 'Output the results of find command without piping to termsql.')
-    parser.add_argument('-o', '--output', action='store_true', help = 'Output results to stdout instead of displaying with tabview')
-    parser.add_argument('-sf', '--show-find-command', action='store_true', help = 'Show the generated find command string without runing the query')
-    parser.add_argument('-st', '--show-termsql-command', action='store_true', help = 'Show the generated termsql command string without running the query')
-    parser.add_argument('-s', '--show-all-fields', action='store_true', help = 'Show all possible fields that can be used in the query')
+    parser.add_argument('-o', '--output', action='store_true', help = 'Output results to stdout instead of displaying with tabview.')
+    parser.add_argument('-sf', '--show-find-command', action='store_true', help = 'Show the generated find command string without runing the query.')
+    parser.add_argument('-st', '--show-termsql-command', action='store_true', help = 'Show the generated termsql command string without running the query.')
+    parser.add_argument('-s', '--show-all-fields', action='store_true', help = 'Show all possible fields that can be used in the query.')
     parser.add_argument('-t', '--extra-termsql-args', nargs = '?', default = config['qfind']['ExtraTermsqlArgs'],
         help = 'Specify additional arguments to termsql. The set of termsql args must be quoted and have a space between the first quote and the first arg eg: qfind -o -t \' -m html\' ...')
     parser.add_argument('-f', '--extra-find-args', nargs = '?', help = 'Supply additional arguments to the find command. The set of find args must be quoted and have a space between the first quote and the first arg eg: qfind -f \" -iname \'*.txt\'\" ...')
     parser.add_argument('start_dir', nargs = '?', help = 'Starting dir. If not specified then the current dir is used.')
-    parser.add_argument('query', nargs = '?', help = 'The file search SQL query')
+    parser.add_argument('query', nargs = '?', help = 'The file search SQL query.')
 
     args = parser.parse_args()
 
