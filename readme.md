@@ -7,7 +7,7 @@ Finds files using a SQL query then displays the output in an interactive ncurses
 When running a query such as:...
 
 ```
-qfind "select path from files where file like '%.txt'"
+qfind "qfind "select path, size, modifieds from files where ext = 'txt'"
 ```
 
 qfind starts by running the find command to get an overall list of files from the current location. The output of find is then piped to TermSQL which runs the query to filter and transform the list of files. The output of TermSQL is then displayed in TabView where the results can be further filtered, sorted, searched etc.
