@@ -65,37 +65,42 @@ usage: qfind [-h] [-d [DELIMITER]] [-of] [-o] [-sf] [-st] [-s]
 Search for files using a SQL query
 
 positional arguments:
-    start_dir             Starting dir. If not specified then the current dir is
-                        used.
-    query                 The file search SQL query
+
+start_dir
+Starting dir. If not specified then the current dir is used.
+
+query
+The file search SQL query
 
 optional arguments:
-    -h, --help            show this help message and exit
-    -d [DELIMITER], --delimiter [DELIMITER]
-                          A singe char used to delimit the output of the find
-                          command (the default is pipe)
-    -of, --output-find    Output the results of find command without piping to
-                          termsql.
-    -o, --output          Output results to stdout instead of displaying with
-                          tabview
-    -sf, --show-find-command
-                          Show the generated find command string without runing
-                          the query
-    -st, --show-termsql-command
-                          Show the generated termsql command string without
-                          running the query
-    -s, --show-all-fields
-                          Show all possible fields that can be used in the query
-    -t [EXTRA_TERMSQL_ARGS], --extra-termsql-args [EXTRA_TERMSQL_ARGS]
-                          Specify additional arguments to termsql. The set of
-                          termsql args must be quoted and have a space between
-                          the first quote and the first arg eg: qfind -o -t ' -m
-                          html' ...
-    -f [EXTRA_FIND_ARGS], --extra-find-args [EXTRA_FIND_ARGS]
-                          Supply additional arguments to the find command. The
-                          set of find args must be quoted and have a space
-                          between the first quote and the first arg eg:
-                          qfind -f " -iname '*.txt'" ...
+
+-h, --help
+show this help message and exit
+
+-d [DELIMITER], --delimiter [DELIMITER]
+A singe char used to delimit the output of the find command (the default is pipe)
+
+-of, --output-find
+Output the results of find command without piping to termsql.
+
+-o, --output
+Output results to stdout instead of displaying with tabview
+
+-sf, --show-find-command
+Show the generated find command string without running the query
+
+-st, --show-termsql-command
+Show the generated termsql command string without
+running the query
+
+-s, --show-all-fields
+Show all possible fields that can be used in the query
+
+-t [EXTRA_TERMSQL_ARGS], --extra-termsql-args [EXTRA_TERMSQL_ARGS]
+Specify additional arguments to termsql. The set of termsql args must be quoted and have a space between the first quote and the first arg eg: qfind -o -t ' -m html' ...
+
+-f [EXTRA_FIND_ARGS], --extra-find-args [EXTRA_FIND_ARGS]
+Supply additional arguments to the find command. The set of find args must be quoted and have a space between the first quote and the first arg eg: qfind -f " -iname '*.txt'" ...
 
 'SELECT *' queries return only the starfields which is a subset of all
 possible fields that the 'find' command can produce. To see a complete list of
@@ -135,7 +140,7 @@ ExtraTermsqlArgs = -o html
 
 ## Speeding up the query
 
-qfins can be sped up by selecting only a few specific columns, such as name or path, instead of "select *", especially if the star fields expand to many fields, the find command will slow down as it will have to stat a lot more info about each file. "select *" queries will also run a bit slower in the TermSQL/SQLite phase.
+qfind can be sped up by selecting only a few specific columns, such as name or path, instead of "select *", especially if the star fields expand to many fields, the find command will slow down as it will have to stat a lot more info about each file. "select *" queries will also run a bit slower in the TermSQL/SQLite phase.
 
 Supply extra args to find to pre-filter the resultset before runnig the SQL e.g.:
 
