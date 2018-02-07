@@ -41,17 +41,13 @@ qfind -st "<sql-query>"
 
 ## Star fields
 
-When running a 'select *' query with qfind, '*' doesn't represent all available fields but instead a smaller subset known as the "Star Fields". The default set of star fields are the same as the `ls -l` command:
+When running a `select *` query with qfind, '*' doesn't represent all available fields but instead a smaller subset known as the star fields. The default set of star fields contains the same fields that the `ls -l` command would return:
 
 permissions hardlinks user groupname size modified type path
 
 Other star fields can be set in the config file (see below)
 
-Run this to list all available fields (Star fields are marked with star characters):
-
-```
-qfind -s
-```
+Run `qfind -s` to list all available fields (star fields are marked with star characters):
 
 ## Computed fields
 
@@ -140,7 +136,7 @@ ExtraTermsqlArgs=
 
 ## Speeding up the query
 
-qfind can be sped up by selecting only a few specific columns, such as name or path, instead of "select *", especially if the star fields expand to many fields, the find command will slow down as it will have to stat a lot more info about each file. "select *" queries will also run a bit slower in the TermSQL/SQLite phase.
+qfind can be sped up by selecting only a few specific columns, such as name or path, instead of `select *`, especially if the star fields expand to many fields, the find command will slow down as it will have to stat a lot more info about each file. `select *` queries will also run a bit slower in the TermSQL/SQLite phase.
 
 Supply extra args to find to pre-filter the resultset before runnig the SQL e.g.:
 
@@ -191,5 +187,3 @@ qfind "select a.name as moviesubdir, b.name as moviefile
      where a.type = 'd'
      and a.depth = 1"
 ```
-
-Tip: To also display orphaned files in the top level movies dir, remove "a.type = 'd'" from the where clause so that it is just "where a.depth = 1"
