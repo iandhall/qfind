@@ -7,14 +7,18 @@ Finds files using a SQL query then displays the output in an interactive ncurses
 When running a query such as:...
 
 ```
-qfind "qfind "select path, size, modifieds from files where ext = 'txt'"
+qfind "select path, size, modifieds from files where ext = 'txt'"
 ```
 
 qfind starts by running the find command to get an overall list of files from the current location. The output of find is then piped to TermSQL which runs the query to filter and transform the list of files. The output of TermSQL is then displayed in TabView where the results can be further filtered, sorted, searched etc.
 
 So what does qfind actually do if the dependencies do all the work? qfind walks through the query to identify field names, these field names are then converted into printf format strings that can be used by the find command. It also passes the field names to TermSQL.
 
-qfind also includes some handy computed fields which get expanded to SQL and can be run by TermSQL/SQLite. To see which find and TermSQL commands qfind would generate for a query run:
+qfind also includes some handy computed fields which get expanded to SQLite function calls and can be run by TermSQL/SQLite. An example of a computer field would be "ext" (the file extension). ext expands to some SQLite function calls which trim the extension from the "name" field which is a real field and is returned by the find command.
+
+To list all fields, including computed fields, run: `qfind -s`
+
+To see which find and TermSQL commands qfind would generate for a query run:
 
 ```
 qfind -sf "<sql-query>"
@@ -23,7 +27,7 @@ qfind -st "<sql-query>"
 
 #### The dependencies:
 
-[The find command](http://man7.org/linux/man-pages/man1/find.1.html)
+[The GNU find command](http://man7.org/linux/man-pages/man1/find.1.html)
 
 - Installed by default in on most *nix systems.
 
@@ -49,9 +53,7 @@ Other star fields can be set in the config file (see below)
 
 Run `qfind -s` to list all available fields (star fields are marked with star characters):
 
-## Computed fields
-
-## Command line arguments
+## Command line arguments and usage
 
 ```
 usage: qfind [-h] [-d [DELIMITER]] [-of] [-o] [-sf] [-st] [-s]
@@ -62,50 +64,44 @@ Search for files using a SQL query
 
 positional arguments:
 
-start_dir
-Starting dir. If not specified then the current dir is used.
+  start_dir             Starting dir. If not specified then the current dir is used.
 
-query
-The file search SQL query
+  query                 The file search SQL query.
 
 optional arguments:
 
--h, --help
-show this help message and exit
+  -h, --help            show this help message and exit
 
--d [DELIMITER], --delimiter [DELIMITER]
-A singe char used to delimit the output of the find command (the default is pipe)
+  -d [DELIMITER], --delimiter [DELIMITER]
 
--of, --output-find
-Output the results of find command without piping to termsql.
+                        A singe char used to delimit the output of the find command (the default is pipe)
 
--o, --output
-Output results to stdout instead of displaying with tabview
+  -of, --output-find    Output the results of find command without piping to termsql.
 
--sf, --show-find-command
-Show the generated find command string without running the query
+  -o, --output          Output results to stdout instead of displaying with tabview.
 
--st, --show-termsql-command
-Show the generated termsql command string without
-running the query
+  -sf, --show-find-command
 
--s, --show-all-fields
-Show all possible fields that can be used in the query
+                        Show the generated find command string without runing the query.
 
--t [EXTRA_TERMSQL_ARGS], --extra-termsql-args [EXTRA_TERMSQL_ARGS]
-Specify additional arguments to termsql. The set of termsql args must be quoted and have a space between the first quote and the first arg eg: qfind -o -t ' -m html' ...
+  -st, --show-termsql-command
+                        Show the generated termsql command string without running the query.
 
--f [EXTRA_FIND_ARGS], --extra-find-args [EXTRA_FIND_ARGS]
-Supply additional arguments to the find command. The set of find args must be quoted and have a space between the first quote and the first arg eg: qfind -f " -iname '*.txt'" ...
+  -s, --show-all-fields
+                        Show all possible fields that can be used in the query.
 
-'SELECT *' queries return only the starfields which is a subset of all
-possible fields that the 'find' command can produce. To see a complete list of
-all fields, run: 'qfind -s'
+  -t [EXTRA_TERMSQL_ARGS], --extra-termsql-args [EXTRA_TERMSQL_ARGS]
+                        Specify additional arguments to termsql. The set of termsql args must be quoted and have a space between the first quote and the first arg eg: qfind -o -t ' -m html' ...
+
+  -f [EXTRA_FIND_ARGS], --extra-find-args [EXTRA_FIND_ARGS]
+                        Supply additional arguments to the find command. The set of find args must be quoted and have a space between the first quote and the first arg eg: qfind -f " -iname '*.txt'" ...
+
+"SELECT *" queries return only the starfields which is a subset of all possible fields that the 'find' command can produce. To see a complete list of all fields, run: qfind -s
 ```
 
 ## The config file
 
-Either...
+The following are valid config file locations:
 
 ```
 ~/.config/qfind/qfind.config
@@ -123,9 +119,7 @@ Either...
 ~/.qfind.config
 ```
 
-The config file use INI file structure. The file starts with a section called 'qfind'.
-
-Example:
+The config file is in an INI file like format. The file must start with a section called 'qfind'. Example:
 
 ```
 [qfind]
@@ -136,15 +130,15 @@ ExtraTermsqlArgs=
 
 ## Speeding up the query
 
-qfind can be sped up by selecting only a few specific columns, such as name or path, instead of `select *`, especially if the star fields expand to many fields, the find command will slow down as it will have to stat a lot more info about each file. `select *` queries will also run a bit slower in the TermSQL/SQLite phase.
+qfind's performance can be improved by selecting only a few specific columns, such as name or path, instead of `select *`. If the star fields contain many fields then the find command will slow down as it will have to stat a lot more info about each file. `select *` queries will also run a bit slower in the TermSQL/SQLite phase.
 
-Supply extra args to find to pre-filter the resultset before runnig the SQL e.g.:
+Speed improvements can also be gained by supplying extra args to the find command to pre-filter the result set before running the SQL e.g.:
 
 ```
 qfind -f " -iname '*.txt'" "select * from files" # TermsSQL will only have to run on ".txt" files
 ```
 
-If I do a later version then I might attempt automatic "preoptimizion", that is to generate an more optimal find command for the SQL query. This will required rewriting the preparse function and will mean adding a lot of complexity.
+Perhaps this could be done automatically in a later version.
 
 ## Examples
 
