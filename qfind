@@ -340,9 +340,9 @@ def get_config():
 
     config = configparser.ConfigParser()
     if not config.read(os.path.expanduser('~/.config/qfind/qfind.config')):
-        if not config.read(os.path.expanduser('~/.qfind/qfind.config')):
-            config.read(os.path.expanduser('~/.qfind.config'))
+        config.read(os.path.expanduser('~/.qfind/qfind.config'))
 
+    # Need to add sections and options if they don't exist to prevent errors when they are accessed.
     if not config.has_section('qfind'):
         config.add_section('qfind')
 

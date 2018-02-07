@@ -113,12 +113,6 @@ The following are valid config file locations:
 ~/.qfind/qfind.config
 ```
 
-...or...
-
-```
-~/.qfind.config
-```
-
 The config file is in an INI file like format. The file must start with a section called 'qfind'. Example:
 
 ```
