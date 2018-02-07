@@ -133,9 +133,9 @@ Example:
 
 ```
 [qfind]
-StarFields = permissions hardlinks user groupname size modified type dirs name ext
-Delimiter = |
-ExtraTermsqlArgs = -o html
+StarFields=permissions hardlinks user groupname size modified type dirs name ext
+Delimiter=
+ExtraTermsqlArgs=
 ```
 
 ## Speeding up the query
