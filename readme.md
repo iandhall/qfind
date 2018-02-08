@@ -64,24 +64,27 @@ Search for files using a SQL query
 
 positional arguments:
 
-  start_dir             Starting dir. If not specified then the current dir is used.
+  start_dir
+                        Starting dir. If not specified then the current dir is used.
 
-  query                 The file search SQL query.
+  query
+                        The file search SQL query.
 
 optional arguments:
 
-  -h, --help            show this help message and exit
+  -h, --help
+                        Show this help message and exit
 
   -d [DELIMITER], --delimiter [DELIMITER]
-
                         A singe char used to delimit the output of the find command (the default is pipe)
 
-  -of, --output-find    Output the results of find command without piping to termsql.
+  -of, --output-find
+                        Output the results of find command without piping to termsql.
 
-  -o, --output          Output results to stdout instead of displaying with tabview.
+  -o, --output
+                        Output results to stdout instead of displaying with tabview.
 
   -sf, --show-find-command
-
                         Show the generated find command string without runing the query.
 
   -st, --show-termsql-command
